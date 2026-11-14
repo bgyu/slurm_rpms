@@ -1,23 +1,74 @@
 # slurm_rpms
-slurm packages for rhel 8.7
 
-## Install epel repo
-dnf install -y \
-  https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+Build and validate a minimal set of Slurm cluster RPMs for an `x86_64` UBI release. The bundle always contains the requested Slurm, Munge, and MariaDB packages, plus only those dependencies that are unavailable from public UBI and EPEL repositories.
 
-This extra repo is used to download slurm-* and hdf5 packages.
+## Prerequisites
 
-Download packages for later installation:
-```bash
-# Other packages in this repo can be downloaded in the same way
-dnf download --downloaddir=/var/packages hdf5-1.10.5-4.el8.x86_64
-```
+Run the downloader from a Linux host such as Fedora under WSL with:
 
-Install on other RHEL 8.7 machine (without epel)
+- Bash, Podman, and network access to Red Hat and Fedora repositories.
+- A registered Red Hat subscription whose entitlement secrets are exposed to Podman containers.
+- Enough temporary disk space for the complete dependency closure. Only the filtered bundle is copied to the destination.
+
+Check the main prerequisites with:
 
 ```bash
-dnf install -y *.rpm
+podman --version
+subscription-manager status
 ```
+
+## Download a minimal bundle
+
+The script requires a UBI image version and a destination directory:
+
+```bash
+./download-slurm-rpms.sh \
+  --ubi-version VERSION \
+  --destination DIRECTORY
+```
+
+For example, build a bundle using UBI 10.2:
+
+```bash
+./download-slurm-rpms.sh \
+  --ubi-version 10.2 \
+  --destination "$PWD/slurm_rpms_el10_minimal"
+```
+
+Show the complete command help with:
+
+```bash
+./download-slurm-rpms.sh --help
+```
+
+The script runs two temporary containers:
+
+1. An entitled container enables EPEL and resolves the complete package transaction.
+2. A clean container masks subscription secrets, removes dependencies available from public UBI/EPEL, and installs the filtered bundle to validate it.
+
+Both containers use `--rm`, and temporary closure RPMs are deleted automatically. Only `x86_64` and `noarch` RPMs are published.
+
+## Install the bundle
+
+The result is a minimal bundle, not a fully offline repository. Install it in a subscription-free matching UBI environment where public UBI repositories are enabled, and enable the corresponding EPEL repository first:
+
+```bash
+bundle=/path/to/slurm_rpms_el10_minimal
+rhel_major=$(rpm -E '%{rhel}')
+
+dnf --disableplugin=subscription-manager install -y \
+  "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${rhel_major}.noarch.rpm"
+
+dnf --disableplugin=subscription-manager install -y "$bundle"/*.rpm
+```
+
+DNF obtains omitted dependencies from public UBI and EPEL repositories. The downloader already verifies this installation path in a clean container with subscription secrets masked.
+
+## Operational notes
+
+- Use a new or empty destination. A rerun accepts an already identical bundle, but rejects stale, additional, or conflicting RPMs rather than deleting them.
+- The UBI image tag selects the base image, while standard UBI repositories track a rolling major-release stream. For example, UBI 8.7 can currently resolve newer EL8-compatible RPMs.
+- The script does not require Podman Compose or manual container teardown.
 
 ## Test after installation
 ```bash
